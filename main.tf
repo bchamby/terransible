@@ -293,13 +293,121 @@ EOP
   }
 }
 
-#load balancer
-#AMI
-#launch configuration
-#ASG
+resource "aws_elb" "prod" {
+  name = "${var.domain_name}-prod-elb"
+  subnets = ["${aws_subnet.private1.id}", "${aws_subnet.private2.id}"]
+  security_groups = ["${aws_security_group.public.id}"]
 
-#Route53 records
-#primary
-#www
-#dev
-#db CNAME
+  listener {
+    instance_port = 80
+    instance_protocol = "http"
+    lb_port = 80
+    lb_protocol = "http"
+  }
+
+  health_check {
+    healthy_threshold = "${var.elb_healthy_threshold}"
+    unhealthy_threshold = "${var.elb_unhealthy_threshold}"
+    timeout = "${var.elb_timeout}"
+    target = "HTTP:80/"
+    interval = "${var.elb_interval}"
+  }
+
+  cross_zone_load_balancing = true
+  idle_timeout = 400
+  connection_draining = true
+  connection_draining_timeout = 400
+
+  tags {
+    Name = "${var.domain_name}-prod-elb"
+  }
+}
+
+resource "random_id" "ami" {
+  byte_length = 8
+}
+
+resource "aws_ami_from_instance" "golden" {
+  name = "ami-${random_id.ami.b64}"
+  source_instance_id = "${aws_instance.dev.id}"
+  provisioner "local-exec" {
+    command = <<EOT
+cat <<EOF > userdata
+#!/bin/bash
+/usr/bin/aws s3 sync s3://${aws_s3_bucket.code.bucket} /var/www/html/
+/bin/touch /var/spool/cron/root
+sudo /bin/echo '*/5 * * * * aws s3 sync s3://${aws_s3_bucket.code.bucket} /var/www/html/' >> /var/spool/cron/root
+EOF
+EOT
+  }
+}
+
+resource "aws_launch_configuration" "lc" {
+  name_prefix = "lc-"
+  image_id = "${aws_ami_from_instance.golden.id}"
+  instance_type = "${var.lc_instance_type}"
+  security_groups = ["${aws_security_group.private.id}"]
+  iam_instance_profile = "${aws_iam_instance_profile.s3_access.id}"
+  key_name = "${aws_key_pair.auth.id}"
+  user_data = "${file("userdata")}"
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_autoscaling_group" "asg" {
+  availability_zones = ["${var.aws_region}a", "${var.aws_region}c"]
+  name = "asg-${aws_launch_configuration.lc.id}"
+  max_size = "${var.asg_max}"
+  min_size = "${var.asg_min}"
+  health_check_grace_period = "${var.asg_grace}"
+  health_check_type = "${var.asg_hct}"
+  desired_capacity = "${var.asg_cap}"
+  force_delete = true
+  load_balancers = ["${aws_elb.prod.id}"]
+  vpc_zone_identifier = ["${aws_subnet.private1.id}", "${aws_subnet.private2.id}"]
+  launch_configuration = "${aws_launch_configuration.lc.name}"
+
+  tag {
+    key = "Name"
+    value = "asg-instance"
+    propagate_at_launch = true
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_route53_zone" "primary" {
+  name = "${var.domain_name}.io"
+  delegation_set_id = "${var.delegation_set}"
+}
+
+resource "aws_route53_record" "www" {
+  zone_id = "${aws_route53_zone.primary.zone_id}"
+  name = "www.${var.domain_name}.io"
+  type = "A"
+
+  alias {
+    name = "${aws_elb.prod.dns_name}"
+    zone_id = "${aws_elb.prod.zone_id}"
+    evaluate_target_health = false
+  }
+}
+
+resource "aws_route53_record" "dev" {
+  zone_id = "${aws_route53_zone.primary.zone_id}"
+  name = "dev.${var.domain_name}.io"
+  type = "A"
+  ttl = "300"
+  records = ["${aws_instance.dev.public_ip}"]
+}
+
+resource "aws_route53_record" "db" {
+  zone_id = "${aws_route53_zone.primary.zone_id}"
+  name = "db.${var.domain_name}.io"
+  type = "CNAME"
+  ttl = "300"
+  records = ["${aws_db_instance.db.address}"]
+}
