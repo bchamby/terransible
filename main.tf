@@ -3,9 +3,6 @@ provider "aws" {
   profile = "${var.aws_profile}"
 }
 
-#IAM
-S3_access
-
 resource "aws_vpc" "vpc" {
   cidr_block = "10.1.0.0/16"
 }
@@ -126,7 +123,7 @@ resource "aws_security_group" "public" {
     from_port = 22
     to_port = 22
     protocol = "tcp"
-    cidr_blocks = ["${var.localip}"]
+    cidr_blocks = ["${var.localip}/32"]
   }
 
   ingress {
@@ -166,7 +163,7 @@ resource "aws_security_group" "private" {
   }
 }
 
-resource "aws_security_group" "RDS" {
+resource "aws_security_group" "rds" {
   name = "sg_rds"
   description = "Used for DB instances."
   vpc_id = "${aws_vpc.vpc.id}"
@@ -179,12 +176,123 @@ resource "aws_security_group" "RDS" {
   }
 }
 
+resource "aws_db_instance" "db" {
+  allocated_storage = 10
+  engine = "mysql"
+  engine_version = "5.6.27"
+  instance_class = "${var.db_instance_class}"
+  name = "${var.dbname}"
+  username = "${var.dbuser}"
+  password = "${var.dbpassword}"
+  db_subnet_group_name = "${aws_db_subnet_group.rds_subnetgroup.name}"
+  vpc_security_group_ids = ["${aws_security_group.rds.id}"]
+}
+
+resource "aws_iam_instance_profile" "s3_access" {
+  name = "s3_access"
+  roles = ["${aws_iam_role.s3_access.name}"]
+}
+
+resource "aws_iam_role_policy" "s3_access_policy" {
+  name = "s3_access_policy"
+  role = "${aws_iam_role.s3_access.id}"
+  policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "s3:*",
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+}
+
+resource "aws_iam_role" "s3_access" {
+  name = "s3_access"
+  assume_role_policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": "sts:AssumeRole",
+      "Principal": {
+        "Service": "ec2.amazonaws.com"
+      },
+      "Effect": "Allow",
+      "Sid": ""
+    }
+  ]
+}
+EOF
+}
+
+# Create S3 VPC endpoint
+resource "aws_vpc_endpoint" "private-s3" {
+  vpc_id = "${aws_vpc.vpc.id}"
+  service_name = "com.amazonaws.${var.aws_region}.s3"
+  route_table_ids = ["${aws_vpc.vpc.main_route_table_id}", "${aws_route_table.public.id}"]
+  policy = <<POLICY
+{
+  "Statement": [
+    {
+      "Action": "*",
+      "Effect": "Allow",
+      "Resource": "*",
+      "Principal": "*"
+    }
+  ]
+}
+POLICY
+}
+
 #S3 code bucket
 
-#Compute
-#key pair
-#dev server
-  #Ansible playbook
+resource "aws_s3_bucket" "code" {
+  bucket = "${var.domain_name}_code1115"
+  acl = "private"
+  force_destroy = true
+  tags {
+    Name = "code bucket"
+  }
+}
+
+resource "aws_key_pair" "auth" {
+  key_name = "${var.key_name}"
+  public_key = "${file(var.public_key_path)}"
+}
+
+# Dev server
+
+resource "aws_instance" "dev" {
+  instance_type = "${var.dev_instance_type}"
+  ami = "${var.dev_ami}"
+  tags {
+    Name = "dev"
+  }
+  key_name = "${aws_key_pair.auth.id}"
+  vpc_security_group_ids = ["${aws_security_group.public.id}"]
+  iam_instance_profile = "${aws_iam_instance_profile.s3_access.id}"
+  subnet_id = "${aws_subnet.public.id}"
+
+  provisioner "local-exec" {
+    command = <<EOP
+cat <<EOF > aws_hosts
+[dev]
+${aws_instance.dev.public_ip}
+[dev:vars]
+s3code=${aws_s3_bucket.code.bucket}
+EOF
+EOP
+  }
+
+  provisioner "local-exec" {
+    command = "sleep 360 && ansible-playbook -i aws_hosts wordpress.yml"
+  }
+}
+
 #load balancer
 #AMI
 #launch configuration
