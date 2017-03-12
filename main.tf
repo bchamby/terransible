@@ -379,13 +379,8 @@ resource "aws_autoscaling_group" "asg" {
   }
 }
 
-resource "aws_route53_zone" "primary" {
-  name = "${var.domain_name}.io"
-  delegation_set_id = "${var.delegation_set}"
-}
-
 resource "aws_route53_record" "www" {
-  zone_id = "${aws_route53_zone.primary.zone_id}"
+  zone_id = "${var.route53_hosted_zone_id}"
   name = "www.${var.domain_name}.io"
   type = "A"
 
@@ -397,7 +392,7 @@ resource "aws_route53_record" "www" {
 }
 
 resource "aws_route53_record" "dev" {
-  zone_id = "${aws_route53_zone.primary.zone_id}"
+  zone_id = "${var.route53_hosted_zone_id}"
   name = "dev.${var.domain_name}.io"
   type = "A"
   ttl = "300"
@@ -405,7 +400,7 @@ resource "aws_route53_record" "dev" {
 }
 
 resource "aws_route53_record" "db" {
-  zone_id = "${aws_route53_zone.primary.zone_id}"
+  zone_id = "${var.route53_hosted_zone_id}"
   name = "db.${var.domain_name}.io"
   type = "CNAME"
   ttl = "300"
