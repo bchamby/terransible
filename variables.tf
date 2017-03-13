@@ -20,5 +20,4 @@ variable "asg_grace" {}
 variable "asg_hct" {}
 variable "asg_cap" {}
 variable "lc_instance_type" {}
-variable "delegation_set" {}
 variable "route53_hosted_zone_id" {}
