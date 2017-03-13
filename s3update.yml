@@ -8,6 +8,6 @@
     - shell: echo "define('WP_SITEURL','http://dev.chamby.io');" >> wp-config.php
       args:
         chdir: /var/www/html/
-    - shell: echo "define('WP_HOME','http://www.chamby.io');" >> wp-config.php
+    - shell: echo "define('WP_HOME','http://dev.chamby.io');" >> wp-config.php
       args:
         chdir: /var/www/html/
