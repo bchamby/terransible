@@ -1,3 +1,6 @@
 terraform.tfvars
 terraform.tfstate
 terraform.tfstate.backup
+aws_hosts
+*.retry
+userdata
