@@ -4,3 +4,4 @@ terraform.tfstate.backup
 aws_hosts
 *.retry
 userdata
+.terraform

@@ -3,6 +3,12 @@ provider "aws" {
   profile = "${var.aws_profile}"
 }
 
+terraform {
+  backend "local" {
+    path = "./state/terraform.tfstate"
+  }
+}
+
 resource "aws_vpc" "vpc" {
   cidr_block = "10.1.0.0/16"
 }
