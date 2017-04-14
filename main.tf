@@ -197,7 +197,7 @@ resource "aws_db_instance" "db" {
 
 resource "aws_iam_instance_profile" "s3_access" {
   name  = "s3_access"
-  role = "${aws_iam_role.s3_access.name}"
+  roles = ["${aws_iam_role.s3_access.name}"]
 }
 
 resource "aws_iam_role_policy" "s3_access_policy" {
